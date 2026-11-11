@@ -17,6 +17,7 @@ const SECRETS = [
   ['Stripe secret key', /(?:sk|rk)_live_[0-9a-zA-Z]{16,}/],
   ['Stripe webhook secret', /whsec_[0-9a-zA-Z]{20,}/],
   ['AWS access key id', /(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9])/],
+  ['AWS secret access key', /aws_?secret_?access_?key["']?\s*[=:]\s*["']?[A-Za-z0-9\/+]{40}(?![A-Za-z0-9\/+])/i],
   ['Google API key', /AIza[0-9A-Za-z_\-]{35}/, 'MEDIUM', 'often public by design (Firebase, Maps): make sure it is restricted to your domains and APIs'],
   // left boundary + at least one digit: keeps CSS names like "task-list-item-..." out
   ['OpenAI / Anthropic key', /(?<![A-Za-z0-9_-])sk-(?=[A-Za-z_-]*\d)[A-Za-z0-9_\-]{32,}/],
@@ -161,9 +162,10 @@ async function selftest() {
   let out = [];
   findSecrets('x ' + key, 't', out);
   findSecrets('AKIA' + 'A'.repeat(16), 't', out);
+  findSecrets('AWS_SECRET_ACCESS_KEY=' + 'Ab1/'.repeat(10), 't', out);
   findSecrets('nothing to see here', 't', out);
   findSecrets('<div class="task-list-item-checkbox-container-wrapper-large">', 't', out);
-  check('two real keys, no false positive', out.length === 2 && out.every((x) => x.level === 'SEVERE'));
+  check('three real keys, no false positive', out.length === 3 && out.every((x) => x.level === 'SEVERE'));
   check('secret value hidden', out.every((x) => !/aaaa/.test(x.hint)));
   out = []; findSecrets('apiKey: "AIza' + 'B'.repeat(35) + '"', 't', out);
   check('Google key is MEDIUM', out.length === 1 && out[0].level === 'MEDIUM');

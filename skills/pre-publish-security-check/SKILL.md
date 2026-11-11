@@ -27,7 +27,7 @@ node <this-skill-folder>/quick_check.js ./path/to/source
 
 What it does:
 
-- **Leaked keys** in the live page, its scripts and every text file of the source folder (`.env.local`, `.env.production`, `.dev.vars` included; `node_modules`, `.git` and virtualenvs skipped): Stripe secret and webhook keys, AWS access key ids, Google API keys, OpenAI and Anthropic keys, GitHub tokens, Slack tokens, Telegram bot tokens, Cloudflare API tokens, private keys. It prints only the first 6 characters of a match.
+- **Leaked keys** in the live page, its scripts and every text file of the source folder (`.env.local`, `.env.production`, `.dev.vars` included; `node_modules`, `.git` and virtualenvs skipped): Stripe secret and webhook keys, AWS access key ids and secret keys written as `aws_secret_access_key = ...`, Google API keys, OpenAI and Anthropic keys, GitHub tokens, Slack tokens, Telegram bot tokens, Cloudflare API tokens, private keys. It prints only the first 6 characters of a match.
 - **18 common open doors** such as `/.env`, `/.git/config`, `/admin`, `/backup.sql`, `/phpinfo.php`, ignoring pages that are just the site's normal "not found" or app shell.
 - **Public source maps** for the site's own scripts.
 - **Security headers** (HSTS, CSP, nosniff, clickjacking, referrer policy), **HTTPS** on the final page, and whether the home page **reflects any Origin with credentials** (CORS on API routes is not tested).
