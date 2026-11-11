@@ -27,14 +27,14 @@ node <this-skill-folder>/quick_check.js ./path/to/source
 
 What it does:
 
-- **Leaked keys** in the live page, its scripts and every text file of the source folder (`.env.local`, `.env.production`, `.dev.vars` included; `node_modules`, `.git` and virtualenvs skipped): Stripe secret and webhook keys, AWS access key ids and secret keys written as `aws_secret_access_key = ...`, Google API keys, OpenAI and Anthropic keys, GitHub tokens, Slack tokens, Telegram bot tokens, Cloudflare API tokens, private keys. It prints only the first 6 characters of a match.
+- **Leaked keys** in the live page, its scripts and every text file up to 3 MB of the source folder (UTF-8 or UTF-16; `.env.local`, `.env.production`, `.dev.vars` included; `node_modules`, `.git` and virtualenvs skipped): Stripe secret and webhook keys, AWS access key ids and secret keys written as `aws_secret_access_key = ...`, Google API keys, OpenAI and Anthropic keys, GitHub tokens, Slack tokens, Telegram bot tokens, Cloudflare API tokens, private keys. It prints only the first 6 characters of a match.
 - **18 common open doors** such as `/.env`, `/.git/config`, `/admin`, `/backup.sql`, `/phpinfo.php`, ignoring pages that are just the site's normal "not found" or app shell.
 - **Public source maps** for the site's own scripts.
 - **Security headers** (HSTS, CSP, nosniff, clickjacking, referrer policy), **HTTPS** on the final page, and whether the home page **reflects any Origin with credentials** (CORS on API routes is not tested).
 
 Node 18+, no dependencies. Run `node <this-skill-folder>/quick_check.js --selftest` to check the tool itself. Only scan sites you own or have permission to test.
 
-- Exit code 1 means something SEVERE. Fix it before publishing. If a secret key leaked, revoke it first and remove it second: it is already compromised.
+- Exit code 1 means something SEVERE. Exit code 2 means the command was wrong or the site could not be reached, so the site was not checked. Fix SEVERE findings before publishing. If a secret key leaked, revoke it first and remove it second: it is already compromised.
 - Google API keys are reported as MEDIUM: Firebase and Maps keys are public by design. Check that the key is restricted to your domains and APIs instead of revoking it.
 - Findings marked "open door" may be a login page, which is fine. Open the URL and look.
 - A clean result means "nothing obvious", not "safe".

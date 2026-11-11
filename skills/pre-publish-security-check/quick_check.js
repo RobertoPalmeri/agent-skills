@@ -68,6 +68,8 @@ async function readStart(r, max = 4000) {
 
 const isHtml = (t) => /^\s*(?:<!doctype|<html|<head|<body|<!--|<meta|<script|<div)/i.test(t);
 const titleOf = (t) => ((t.match(/<title[^>]*>([^<]*)/i) || [])[1] || '').trim();
+// page fingerprint without attribute values (nonces, CSRF tokens) and whitespace
+const shape = (t) => t.replace(/=\s*(?:"[^"]*"|'[^']*')/g, '=').replace(/\s+/g, ' ').slice(0, 2000);
 const noQuery = (u) => u.split(/[?#]/)[0]; // a key in ?key=... must not be printed
 
 async function checkUrl(url, out) {
@@ -85,10 +87,12 @@ async function checkUrl(url, out) {
   let fallback = '';
   try {
     const r = await get('/qc-' + Date.now().toString(36) + '-does-not-exist');
-    fallback = r.status === 200 ? await readStart(r) : (r.body?.cancel().catch(() => {}), '');
+    fallback = r.status === 200 ? await readStart(r, 65536) : (r.body?.cancel().catch(() => {}), '');
   } catch (e) { /* skip */ }
-  const seenPages = [html, fallback].filter(Boolean);
-  const sameAsKnownPage = (t) => seenPages.some((p) => p.slice(0, 300) === t.slice(0, 300) || (isHtml(t) && titleOf(t) !== '' && titleOf(p) === titleOf(t)));
+  const seenShapes = [html, fallback].filter(Boolean).map(shape);
+  // titles are compared with the not-found page only: a real /admin often shares the home page's layout and title
+  const fallbackTitle = isHtml(fallback) ? titleOf(fallback) : null;
+  const sameAsKnownPage = (t) => seenShapes.includes(shape(t)) || (isHtml(t) && titleOf(t) !== '' && titleOf(t) === fallbackTitle);
 
   const scripts = [...new Set([...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map((m) => m[1]))].slice(0, 25);
   for (const src of scripts) {
@@ -111,7 +115,7 @@ async function checkUrl(url, out) {
     try {
       const r = await get(d);
       if (r.status !== 200) { r.body?.cancel().catch(() => {}); continue; }
-      const t = await readStart(r);
+      const t = await readStart(r, 65536);
       if (!t.trim() || sameAsKnownPage(t)) continue;
       if (isHtml(t) && (!HTML_DOOR.test(d) || /404|not found/i.test(titleOf(t)))) continue; // a .env or .sql is never an HTML page
       out.push({ level: SEVERE_DOOR.test(d) ? 'SEVERE' : 'MEDIUM', what: `open door without login: ${d} (200). Check by hand: a login page is fine, data is not.` });
@@ -133,6 +137,14 @@ async function checkUrl(url, out) {
   } catch (e) { /* skip */ }
 }
 
+// Windows PowerShell 5.1 writes UTF-16 by default (echo KEY=... > .env): decode it instead of calling it binary
+function textOf(buf) {
+  const even = (b) => b.subarray(0, b.length & ~1);
+  if (buf[0] === 0xff && buf[1] === 0xfe) return even(buf.subarray(2)).toString('utf16le');
+  if (buf[0] === 0xfe && buf[1] === 0xff) return Buffer.from(even(buf.subarray(2))).swap16().toString('utf16le');
+  return buf.subarray(0, 8000).includes(0) ? null : buf.toString('utf8'); // null: binary file
+}
+
 function checkFolder(dir, out) {
   let count = 0;
   (function walk(d) {
@@ -142,12 +154,13 @@ function checkFolder(dir, out) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(p); continue; }
       try {
-        if (!e.isFile() || fs.statSync(p).size > 3e6) continue;
-        const buf = fs.readFileSync(p);
-        if (buf.subarray(0, 8000).includes(0)) continue; // binary file
-        count++;
+        const st = fs.statSync(p); // follows a symlinked file (.env -> ../secrets/.env); folder links are not walked
+        if (!st.isFile() || st.size > 3e6) continue;
         if (ENV_FILE.test(e.name) && !ENV_EXAMPLE.test(e.name)) out.push({ level: 'MEDIUM', what: `secrets file in the folder: ${p} (must never be published)` });
-        findSecrets(buf.toString('utf8'), p, out);
+        const text = textOf(fs.readFileSync(p));
+        if (text === null) continue;
+        count++;
+        findSecrets(text, p, out);
       } catch (err) { out.push({ level: 'LOW', what: `could not read ${p} (${err.code})` }); }
     }
   })(dir);
@@ -176,30 +189,43 @@ async function selftest() {
     fs.writeFileSync(path.join(tmp, '.env.local'), 'STRIPE=' + key);
     fs.writeFileSync(path.join(tmp, 'App.tsx'), `const k = '${key}'`);
     fs.writeFileSync(path.join(tmp, '.env.example'), 'STRIPE=');
+    fs.writeFileSync(path.join(tmp, '.env'), Buffer.from(String.fromCharCode(0xfeff) + 'STRIPE=' + key, 'utf16le')); // PowerShell 5.1 "> .env"
     fs.mkdirSync(path.join(tmp, 'node_modules'));
     fs.writeFileSync(path.join(tmp, 'node_modules', 'x.js'), key);
     out = [];
     const n = checkFolder(tmp, out);
-    check('folder walk', n === 3 && out.filter((x) => x.level === 'SEVERE').length === 2 && out.filter((x) => /secrets file/.test(x.what)).length === 1);
+    check('folder walk', n === 4 && out.filter((x) => x.level === 'SEVERE').length === 3 && out.filter((x) => /secrets file/.test(x.what)).length === 2);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 
+  const doorsOn = async (handler) => {
+    const server = http.createServer(handler);
+    await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+    try {
+      out = [];
+      await checkUrl(`http://127.0.0.1:${server.address().port}/`, out);
+      return out.filter((x) => /open door/.test(x.what));
+    } finally { server.closeAllConnections?.(); server.close(); }
+  };
+
   // SPA host: every path returns the page with a fresh nonce; only the real /.env is exposed
-  const server = http.createServer((req, res) => {
+  let doors = await doorsOn((req, res) => {
     const p = new URL(req.url, 'http://x').pathname;
     if (p === '/.env') return res.end('DB_PASSWORD=hunter2\n');
     if (p === '/app.js') return res.end('var s="//# sourceMappingURL="+n;\n//# sourceMappingURL=app.js.map\n');
     res.setHeader('content-type', 'text/html');
     res.end(`<!doctype html><html><head><script nonce="${Math.random()}"></script><title>Shop</title></head><body><script src="/app.js?key=AIza${'Q'.repeat(35)}"></script></body></html>`);
   });
-  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
-  try {
-    out = [];
-    await checkUrl(`http://127.0.0.1:${server.address().port}/`, out);
-    const doors = out.filter((x) => /open door/.test(x.what));
-    check('soft-404 doors', doors.length === 1 && /\/\.env /.test(doors[0].what));
-    check('no fake source map', !out.some((x) => /source map/.test(x.what)));
-    check('script query not printed', !out.some((x) => /QQQQ/.test(x.what)));
-  } finally { server.closeAllConnections?.(); server.close(); }
+  check('soft-404 doors', doors.length === 1 && /\/\.env /.test(doors[0].what));
+  check('no fake source map', !out.some((x) => /source map/.test(x.what)));
+  check('script query not printed', !out.some((x) => /QQQQ/.test(x.what)));
+
+  // server-rendered site with real 404s: an open /admin that shares the home page's title is still reported
+  doors = await doorsOn((req, res) => {
+    const p = new URL(req.url, 'http://x').pathname;
+    res.statusCode = p === '/' || p === '/admin' ? 200 : 404;
+    res.end(`<!doctype html><html><head><title>Shop</title></head><body>${p === '/admin' ? '<table>all users</table>' : 'Welcome'}</body></html>`);
+  });
+  check('admin with same title', doors.length === 1 && /\/admin /.test(doors[0].what));
 
   console.log(fails.length ? 'selftest FAILED: ' + fails.join(', ') : 'selftest ok');
   process.exitCode = fails.length ? 1 : 0;
