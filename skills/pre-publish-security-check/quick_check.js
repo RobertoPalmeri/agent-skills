@@ -66,7 +66,8 @@ async function readStart(r, max = 4000) {
   return Buffer.concat(chunks).subarray(0, max).toString('utf8');
 }
 
-const isHtml = (t) => /^\s*(?:<!doctype|<html|<head|<body|<!--|<meta|<script|<div)/i.test(t);
+// any page that starts with a tag (block pages often start with <h1> or <style>); an XML answer is not a page
+const isHtml = (t) => /^\s*<(?!\?xml)[!a-z]/i.test(t);
 const titleOf = (t) => ((t.match(/<title[^>]*>([^<]*)/i) || [])[1] || '').trim();
 // page fingerprint without attribute values (nonces, CSRF tokens) and whitespace
 const shape = (t) => t.replace(/=\s*(?:"[^"]*"|'[^']*')/g, '=').replace(/\s+/g, ' ').slice(0, 2000);
