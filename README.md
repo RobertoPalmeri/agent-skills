@@ -12,7 +12,7 @@ The three refer to each other, so installing all of them is the simplest choice.
 
 ## Install
 
-Claude Code: clone or download this repository, then copy the skill folders into `~/.claude/skills/` (all your projects) or `.claude/skills/` inside one project.
+Claude Code: `git clone https://github.com/RobertoPalmeri/agent-skills.git` (or download it), then copy the skill folders into `~/.claude/skills/` (all your projects) or `.claude/skills/` inside one project.
 
 ```bash
 cd agent-skills
